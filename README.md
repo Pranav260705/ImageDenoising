@@ -4,17 +4,15 @@
 1. [Introduction](#introduction)
 2. [Prerequisites](#prerequisites)
 3. [Basic Concepts](#basic-concepts)
-4. [Image Denoising](#image-denoising)
-5. [Image Segmentation](#image-segmentation)
+4. [Sparse Matrix Operations](#sparse-matrix-operations)
+5. [Image Denoising](#image-denoising)
 6. [Implementation Details](#implementation-details)
 7. [Usage Examples](#usage-examples)
 8. [Tips and Best Practices](#tips-and-best-practices)
 
 ## Introduction
 
-This guide explains medical image processing techniques using sparse matrices, focusing on two main tasks:
-1. Removing noise from medical images (denoising)
-2. Separating different regions in medical images (segmentation)
+This guide explains medical image processing techniques using sparse matrices, focusing on removing noise from medical images (denoising) using sparse representation and dictionary learning.
 
 ## Prerequisites
 
@@ -31,7 +29,6 @@ from scipy import sparse       # For sparse matrix operations
 from scipy.fftpack import dct  # For DCT transform
 from sklearn.decomposition import PCA  # For dictionary learning
 from skimage import io, util   # For image processing
-import cv2                     # For additional image processing
 ```
 
 ## Basic Concepts
@@ -52,6 +49,144 @@ import cv2                     # For additional image processing
 - Matrices with mostly zero elements
 - Efficient storage: Only store non-zero elements
 - Faster computations compared to dense matrices
+
+## Sparse Matrix Operations
+
+### 1. Creating Sparse Matrices
+
+#### Basic Creation Methods
+```python
+# 1. COO (Coordinate) Format
+# Most intuitive for construction
+row_indices = [0, 1, 2]  # Row indices of non-zero elements
+col_indices = [0, 1, 2]  # Column indices of non-zero elements
+data = [1, 2, 3]        # Values of non-zero elements
+sparse_matrix = sparse.coo_matrix((data, (row_indices, col_indices)), shape=(3, 3))
+
+# 2. CSR (Compressed Sparse Row) Format
+# Efficient for matrix operations
+sparse_matrix_csr = sparse.csr_matrix((data, (row_indices, col_indices)), shape=(3, 3))
+
+# 3. Diagonal Matrix
+sparse_diag = sparse.diags([1, 2, 3], offsets=[0, 1, -1])
+
+# 4. Identity Matrix
+sparse_eye = sparse.eye(3)
+```
+
+#### Special Sparse Matrices
+```python
+# 1. Block Diagonal Matrix
+def create_block_diagonal(blocks):
+    """Creates a block diagonal sparse matrix"""
+    n_blocks = len(blocks)
+    block_sizes = [block.shape[0] for block in blocks]
+    total_size = sum(block_sizes)
+    
+    # Create row and column indices
+    row_indices = []
+    col_indices = []
+    data = []
+    
+    start_idx = 0
+    for block in blocks:
+        rows, cols = block.nonzero()
+        row_indices.extend(rows + start_idx)
+        col_indices.extend(cols + start_idx)
+        data.extend(block.data)
+        start_idx += block.shape[0]
+    
+    return sparse.coo_matrix((data, (row_indices, col_indices)), 
+                           shape=(total_size, total_size))
+
+# 2. Toeplitz Matrix
+def create_toeplitz(first_row, first_col):
+    """Creates a Toeplitz sparse matrix"""
+    n = len(first_row)
+    row_indices = []
+    col_indices = []
+    data = []
+    
+    for i in range(n):
+        for j in range(n):
+            if i <= j:
+                data.append(first_row[j-i])
+            else:
+                data.append(first_col[i-j])
+            row_indices.append(i)
+            col_indices.append(j)
+    
+    return sparse.coo_matrix((data, (row_indices, col_indices)), shape=(n, n))
+```
+
+### 2. Sparse Matrix Operations
+
+#### Basic Operations
+```python
+# 1. Addition
+result = sparse_matrix1 + sparse_matrix2
+
+# 2. Multiplication
+# Element-wise multiplication
+result = sparse_matrix1.multiply(sparse_matrix2)
+
+# Matrix multiplication
+result = sparse_matrix1 @ sparse_matrix2  # or
+result = sparse_matrix1.dot(sparse_matrix2)
+
+# 3. Transpose
+result = sparse_matrix.T
+
+# 4. Inverse (if matrix is square and invertible)
+result = sparse.linalg.inv(sparse_matrix)
+```
+
+#### Advanced Operations
+```python
+# 1. Solving Linear Systems
+# Ax = b
+x = sparse.linalg.spsolve(A, b)
+
+# 2. Eigenvalue Decomposition
+eigenvalues, eigenvectors = sparse.linalg.eigsh(A, k=5)  # k largest eigenvalues
+
+# 3. Matrix Norms
+frobenius_norm = sparse.linalg.norm(A, ord='fro')
+```
+
+### 3. Memory Efficiency
+
+#### Storage Formats
+1. **COO (Coordinate)**
+   - Stores (row, col, value) tuples
+   - Good for construction
+   - Not efficient for operations
+
+2. **CSR (Compressed Sparse Row)**
+   - Stores non-zero values, column indices, and row pointers
+   - Efficient for matrix operations
+   - Good for row-wise access
+
+3. **CSC (Compressed Sparse Column)**
+   - Similar to CSR but column-oriented
+   - Good for column-wise access
+   - Efficient for certain operations
+
+#### Memory Usage Example
+```python
+def compare_memory_usage(dense_matrix, sparse_matrix):
+    """Compare memory usage between dense and sparse matrices"""
+    dense_memory = dense_matrix.nbytes
+    sparse_memory = sparse_matrix.data.nbytes + \
+                   sparse_matrix.indices.nbytes + \
+                   sparse_matrix.indptr.nbytes
+    
+    return {
+        'dense_memory': dense_memory,
+        'sparse_memory': sparse_memory,
+        'compression_ratio': dense_memory / sparse_memory
+    }
+```
 
 ## Image Denoising
 
@@ -116,40 +251,6 @@ dictionary = pca.fit_transform(patches.T).T
   - Improves denoising quality
   - Captures image-specific patterns
 
-## Image Segmentation
-
-### Step-by-Step Explanation
-
-#### 1. Gradient Computation
-```python
-def compute_gradient(image):
-    """Computes image gradients using Sobel operators"""
-```
-- **What are Gradients?**
-  - Rate of change in pixel values
-  - High gradients = edges
-  - Direction and magnitude of change
-- **Sobel Operators:**
-  - Detect horizontal and vertical edges
-  - Less sensitive to noise than simple differences
-  - Combined to get gradient magnitude
-
-#### 2. Sparse Matrix Diffusion
-```python
-def sparse_matrix_segmentation(image, n_iterations=100):
-    """Performs segmentation using sparse matrix operations"""
-```
-- **How Diffusion Works:**
-  1. Create sparse matrix for pixel neighborhoods
-  2. Weight connections based on gradients
-  3. Iteratively smooth image
-  4. Preserve edges using gradient weights
-- **Mathematical Formula:**
-  \[ w_{ij} = \exp(-\|\nabla I_{ij}\| / \lambda) \]
-  - w_{ij}: Weight between pixels i and j
-  - ∇I: Image gradient
-  - λ: Diffusion parameter
-
 ## Implementation Details
 
 ### Key Functions
@@ -188,9 +289,6 @@ noisy_image = add_noise_to_image(image, 'gaussian', 0.1)
 
 # Denoise
 denoised_image = denoise_medical_image(noisy_image)
-
-# Segment
-segmented_image = sparse_matrix_segmentation(image)
 
 # Evaluate
 metrics = evaluate_performance(image, denoised_image)
